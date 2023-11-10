@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- Using Composables for now (this is not used)-->
+
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Title -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BLE Device Scanner"
+        android:id="@+id/title"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="16dp"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- Scanning Section -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/scanningStatus"
+        android:layout_centerHorizontal="true"
+        android:layout_below="@id/title"
+        android:layout_marginTop="16dp"
+        android:text="Scanning for Devices..."
+        android:textSize="18sp"
+        android:textColor="#FF0000" />
+
+    <!-- List of Discovered Devices -->
+    <ListView
+        android:id="@+id/deviceList"
+        android:layout_width="match_parent"
+        android:layout_height="329dp"
+        android:layout_below="@id/scanningStatus"
+        android:layout_marginTop="16dp" />
+
+    <!-- Connect Button -->
+
+    <!-- Device Details Section -->
+
+    <Button
+        android:id="@+id/connectButton"
+        android:layout_width="wrap_content"
+        android:layout_height="45dp"
+        android:layout_below="@id/deviceList"
+        android:layout_marginLeft="50dp"
+        android:layout_marginTop="16dp"
+        android:text="Connect"
+        android:visibility="visible" />
+
+    <Button
+        android:id="@+id/disconnectButton"
+        android:layout_width="125dp"
+        android:layout_height="45dp"
+        android:layout_below="@id/deviceDetails"
+        android:layout_marginLeft="210dp"
+        android:layout_marginTop="-85dp"
+        android:text="Disconnect"
+        android:visibility="visible" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:id="@+id/deviceDetails"
+        android:layout_centerHorizontal="true"
+        android:layout_below="@id/connectButton"
+        android:layout_marginTop="16dp"
+        android:text="Device Details:"
+        android:textSize="18sp" />
+
+    <!-- Disconnect Button -->
+
+</RelativeLayout>
