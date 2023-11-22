@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- gatt_services_characteristics.xml -->
+    <resources>
+
+        <!-- Heart Rate Service -->
+        <service
+            name="Heart Rate Service"
+            type="org.bluetooth.service.heart_rate"
+            uuid="0000180D-0000-1000-8000-00805F9B34FB">
+
+            <!-- Heart Rate Measurement Characteristic -->
+            <characteristic
+                name="Heart Rate Measurement"
+                uuid="00002A37-0000-1000-8000-00805F9B34FB"
+                properties="Notify">
+
+                <!-- Client Characteristic Configuration Descriptor -->
+                <descriptor
+                    name="Client Characteristic Configuration"
+                    uuid="00002902-0000-1000-8000-00805F9B34FB" />
+
+            </characteristic>
+
+            <!-- Body Sensor Location Characteristic -->
+            <characteristic
+                name="Body Sensor Location"
+                uuid="00002A38-0000-1000-8000-00805F9B34FB"
+                properties="Read" />
+
+        </service>
+
+        <!-- Battery Service -->
+        <service
+            name="Battery Service"
+            type="org.bluetooth.service.battery_service"
+            uuid="0000180F-0000-1000-8000-00805F9B34FB">
+
+            <!-- Battery Level Characteristic -->
+            <characteristic
+                name="Battery Level"
+                uuid="00002A19-0000-1000-8000-00805F9B34FB"
+                properties="Read" />
+
+        </service>
+
+        <!-- Add more services and characteristics as needed -->
+
+    </resources>
+
+</LinearLayout>
