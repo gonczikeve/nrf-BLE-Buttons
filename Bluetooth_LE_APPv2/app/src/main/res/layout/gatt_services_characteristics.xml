@@ -1,0 +1,20 @@
+<!-- gatt_services_characteristics_layout.xml -->
+
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <!-- RecyclerView to display GATT services and characteristics -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerViewGatt"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/background_light"
+        android:divider="@android:color/darker_gray"
+        android:dividerHeight="1dp"
+        android:padding="16dp"
+        android:scrollbars="vertical" />
+
+</LinearLayout>
