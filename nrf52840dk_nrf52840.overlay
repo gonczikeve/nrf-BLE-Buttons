@@ -1,0 +1,31 @@
+/ {
+    buttons {
+        touch0: touch_0 {
+            gpios = <&gpio1 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        };
+    };
+};
+
+/ {
+    buttons {
+        touch1: touch_1 {
+            gpios = <&gpio1 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        };
+    };
+};
+
+/ {
+    buttons {
+        touch2: touch_2 {
+            gpios = <&gpio1 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        };
+    };
+};
+
+/ {
+    buttons {
+        touch3: touch_3 {
+            gpios = <&gpio1 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        };
+    };
+};
