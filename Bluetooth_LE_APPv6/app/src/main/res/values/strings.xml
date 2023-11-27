@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Bluetooth_LE_APPv2</string>
+    <string name="GATT_Connected">GattConnected</string>
+    <string name="GATT_Disconnected">GattDisconnected</string>
+    <string name="unknown_service">Unknown_Service</string>
+    <string name="unknown_characteristic">Unknown Characteristics</string>
+</resources>
