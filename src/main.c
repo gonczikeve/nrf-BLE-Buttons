@@ -58,6 +58,7 @@ static struct bt_le_adv_param *adv_param =
 static struct gpio_callback button_cb_port0;
 static struct gpio_callback button_cb_port1;
 volatile uint32_t button_pressed = 0;
+volatile uint32_t button_pressed2 = 0;
 uint32_t pinmask_port0 = 0;
 uint32_t pinmask_port1 = 0;
 
@@ -72,7 +73,7 @@ void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint3
 void button_pressed_cb2(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
 	LOG_INF("callback2 at %d, ----------------------%d\n", k_cycle_get_32(), pins);
-	
+	button_pressed2 = pins;
 }
 
 int buttons_init(void){
@@ -161,7 +162,7 @@ static uint32_t get_buttons(void)
 	return ret;
 }
 
-uint8_t buttonstateToUint(uint32_t buttonstate){
+uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 	//pack the 8 buttons into a uint8_t
 	uint8_t ret = 0;
 	int ctr = 0;
@@ -169,7 +170,18 @@ uint8_t buttonstateToUint(uint32_t buttonstate){
 		if(pinmask_port0 & (1 << i)){
 			ret |= (buttonstate>>i)<<ctr;
 			ctr++;
-			if(ctr > 7){
+			if(ctr > 3){
+				LOG_ERR("Too many buttons pressed");
+				break;
+			}
+		}
+	}
+	ctr = 0;
+	for(int i = 0; i < 32; i++){
+		if(pinmask_port1 & (1 << i)){
+			ret |= (buttonstate2>>i)<<(ctr + 4);
+			ctr++;
+			if(ctr > 3){
 				LOG_ERR("Too many buttons pressed");
 				break;
 			}
@@ -182,6 +194,15 @@ uint8_t buttonstateToUint(uint32_t buttonstate){
 
 int main(void)
 {
+	if (NRF_UICR->REGOUT0 != UICR_REGOUT0_VOUT_3V3) 
+	{
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Wen << NVMC_CONFIG_WEN_Pos;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
+		NRF_UICR->REGOUT0 = UICR_REGOUT0_VOUT_3V3;
+
+		NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos;
+		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
+	}
 	int err;
 	LOG_INF("Hello World!, array size: %d", ARRAY_SIZE(buttons));
 	if(!buttons_init()){
@@ -205,10 +226,10 @@ int main(void)
 
 	uint32_t buttons = 0;
 	while(1){
-		if(button_pressed){
-			adv_mfg_data.buttonstate = (uint16_t)buttonstateToUint(button_pressed);//this works bc the ad only stores the pointer to the data
+		if(button_pressed || button_pressed2){
+			adv_mfg_data.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
 			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
-			button_pressed = 0;
+			button_pressed = 0, button_pressed2 = 0;
 			LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.buttonstate);
 			k_msleep(1000);
 		}
