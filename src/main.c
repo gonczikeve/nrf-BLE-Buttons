@@ -10,7 +10,7 @@
 LOG_MODULE_REGISTER(dynaforce, LOG_LEVEL_INF);
 #define BUTTONS_NODE DT_PATH(buttons)
 #define GPIO0_DEV DEVICE_DT_GET(DT_NODELABEL(gpio0))
-#define GPIO1_DEV DEVICE_DT_GET_OR_NULL(DT_NODELABEL(gpio1))
+#define GPIO1_DEV DEVICE_DT_GET(DT_NODELABEL(gpio1))
 
 #define CODED_PHY 0//BT_LE_ADV_OPT_CODED //if we want to use coded phy
 
@@ -166,23 +166,25 @@ uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 	//pack the 8 buttons into a uint8_t
 	uint8_t ret = 0;
 	int ctr = 0;
+	//check buttons on the first port
 	for(int i = 0; i < 32; i++){
 		if(pinmask_port0 & (1 << i)){
-			ret |= (buttonstate>>i)<<ctr;
+			ret |= ((buttonstate >> i) & 1) << ctr;
 			ctr++;
-			if(ctr > 3){
-				LOG_ERR("Too many buttons pressed");
+			if(ctr > 4){
+				LOG_ERR("More buttons than attached to the port are pressed, buttonstate: 0x%x, ret 0x%x", buttonstate, ret);
 				break;
 			}
 		}
 	}
+	//check buttons on the second port
 	ctr = 0;
 	for(int i = 0; i < 32; i++){
 		if(pinmask_port1 & (1 << i)){
-			ret |= (buttonstate2>>i)<<(ctr + 4);
+			ret |= ((buttonstate2 >> i) & 1) << (ctr + 4);
 			ctr++;
-			if(ctr > 3){
-				LOG_ERR("Too many buttons pressed");
+			if(ctr > 4){
+				LOG_ERR("More buttons than attached to the port are pressed, buttonstate2: 0x%x, ret 0x%x", buttonstate2, ret);
 				break;
 			}
 		}
@@ -204,14 +206,16 @@ int main(void)
 		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
 	}
 	int err;
-	LOG_INF("Hello World!, array size: %d", ARRAY_SIZE(buttons));
+	
+	
 	if(!buttons_init()){
 		LOG_INF("Buttons initialized");
 	}
 	else{
 		LOG_ERR("Buttons not initialized");
 	}
-
+	k_msleep(1000);
+	printk("pinmask0 0x%x, pinmask1 0x%x, array size: %d\n",  pinmask_port0, pinmask_port1,ARRAY_SIZE(buttons));
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)\n", err);
@@ -228,14 +232,14 @@ int main(void)
 	while(1){
 		if(button_pressed || button_pressed2){
 			adv_mfg_data.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
-			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
+			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 			button_pressed = 0, button_pressed2 = 0;
 			LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.buttonstate);
 			k_msleep(1000);
 		}
 		else{
 			adv_mfg_data.buttonstate = 0;
-			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
+			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		}
 		
 	}
