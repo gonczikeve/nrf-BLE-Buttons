@@ -40,11 +40,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.bluetooth_le_appv2.ui.theme.Bluetooth_LE_APPv2Theme
+import java.util.Arrays
 
 
 private const val TAG = "BluetoothLeService"
 private var connected: Boolean by mutableStateOf(false)
-private var btData: Any? by mutableStateOf("Please Press the Buttons")
+private var btData: String? by mutableStateOf("Please Press the Buttons")
 const val TAG1 = "ValueRead"
 
 class BluetoothLeService : Service() {
@@ -109,7 +110,9 @@ class BluetoothLeService : Service() {
             val hexString: String = data.joinToString(separator = " ") {
                 String.format("%02X", it)
             }
-            intent.putExtra(EXTRA_DATA, "$data\n$hexString")
+            val stringedData = Arrays.toString(data)
+            //intent.putExtra(EXTRA_DATA, "$stringedData\n$hexString")
+            intent.putExtra(EXTRA_DATA, hexString)
         }
         Log.d(TAG1,"broadcastUpdate")
 
@@ -366,7 +369,8 @@ class DeviceControlActivity : AppCompatActivity() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Name of the device: ${device.name}\nAddress of the device: ${device.address}\nButton Data: $btData",color = Color.Black)
+
+            Text("Name of the device: ${device.name}\nAddress of the device: ${device.address}\nButton Data: ${btData.toString()}",color = Color.Black)
             ConnectionStatusView(connected)
             CharaDisplay(mGattCharacteristics = mGattCharacteristic)
         }
