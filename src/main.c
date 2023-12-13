@@ -7,6 +7,15 @@
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gap.h>
 
+#include <zephyr/types.h>
+#include <stddef.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/util.h>
+
+
+#include <zephyr/bluetooth/hci.h>
+
+
 LOG_MODULE_REGISTER(dynaforce, LOG_LEVEL_INF);
 #define BUTTONS_NODE DT_PATH(buttons)
 #define GPIO0_DEV DEVICE_DT_GET(DT_NODELABEL(gpio0))
@@ -20,6 +29,12 @@ static const struct gpio_dt_spec buttons[] = {
 	DT_FOREACH_CHILD(BUTTONS_NODE, GPIO_SPEC_AND_COMMA)
 #endif
 };
+
+#define BT_LE_ADV_SCAN_NOTIFY BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_NOTIFY_SCAN_REQ, \
+					BT_GAP_ADV_FAST_INT_MIN_2, \
+					BT_GAP_ADV_FAST_INT_MAX_2, \
+					NULL)
+
 #define ADV_MIN 100/0.625
 #define ADV_MAX 101/0.625
 #define COMPANY_ID_CODE            0x0059//This is nordic's company ID, Algra Group should
@@ -28,7 +43,7 @@ static const struct gpio_dt_spec buttons[] = {
 
 #define DEVICE_NAME "DynaForceButtons"
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
-
+static struct bt_le_ext_adv *adv;
 typedef struct adv_mfg_data {
 	uint16_t company_code;	    /* Company Identifier Code. */
 	uint16_t buttonstate;      
@@ -62,6 +77,17 @@ volatile uint32_t button_pressed2 = 0;
 uint32_t pinmask_port0 = 0;
 uint32_t pinmask_port1 = 0;
 
+static void scanned(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_scanned_info *info) {
+	char addr[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(info->addr, addr, sizeof(addr));
+    printk("Scanned by addr:%s\n", addr);
+}
+
+static struct bt_le_ext_adv_cb adv_callbacks = {
+        .sent = NULL,
+		.connected = NULL,
+        .scanned = scanned
+ };
 
 void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
@@ -222,24 +248,38 @@ int main(void)
 		return;
 	}
 
-	err = bt_le_adv_start(adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	if (err) {
-		LOG_ERR("Advertising failed to start (err %d)\n", err);
-		return;
-	}
+	err = bt_le_ext_adv_create(BT_LE_ADV_SCAN_NOTIFY, &adv_callbacks, &adv);
+    if (err) {
+        LOG_ERR("Failed to create advertiser set (%d)\n", err);
+        return -1;
+    }
+	err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+    if (err) {
+        LOG_ERR("Failed to set advertising data (%d)\n", err);
+        return -1;
+    }
+	err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+    if (err) {
+        LOG_ERR("Failed to start advertising set (%d)\n", err);
+        return -1;
+    }
+	LOG_INF("Advertising started");
+
+
+
 
 	uint32_t buttons = 0;
 	while(1){
 		if(button_pressed || button_pressed2){
 			adv_mfg_data.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
-			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+			bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 			button_pressed = 0, button_pressed2 = 0;
 			LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.buttonstate);
 			k_msleep(1000);
 		}
 		else{
 			adv_mfg_data.buttonstate = 0;
-			bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+			bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		}
 		
 	}
