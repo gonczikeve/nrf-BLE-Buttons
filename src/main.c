@@ -6,6 +6,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/gap.h>
+#include <zephyr/bluetooth/addr.h>
 
 #include <zephyr/types.h>
 #include <stddef.h>
@@ -30,13 +31,13 @@ static const struct gpio_dt_spec buttons[] = {
 #endif
 };
 
-#define BT_LE_ADV_SCAN_NOTIFY BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_NOTIFY_SCAN_REQ, \
-					BT_GAP_ADV_FAST_INT_MIN_2, \
-					BT_GAP_ADV_FAST_INT_MAX_2, \
-					NULL)
+//ble address of central towards which we are advertising 7D:F0:69:55:B8:ED
+#define CENTRAL_ADDR 0xED,0xB8,0x55,0x69,0xF0,0x7D
+static const uint8_t central_addr[6] = {CENTRAL_ADDR};
+bt_addr_le_t central_addr_le = {.type = BT_ADDR_LE_RANDOM, .a = {.val = CENTRAL_ADDR}};
 
 #define ADV_MIN 100/0.625
-#define ADV_MAX 101/0.625
+#define ADV_MAX 101/0.62
 #define COMPANY_ID_CODE            0x0059//This is nordic's company ID, Algra Group should
 //get their own company ID if using this solution
 
@@ -44,28 +45,32 @@ static const struct gpio_dt_spec buttons[] = {
 #define DEVICE_NAME "DynaForceButtons"
 #define DEVICE_NAME_LEN (sizeof(DEVICE_NAME) - 1)
 static struct bt_le_ext_adv *adv;
+
+typedef struct __attribute__((packed)) message{
+	uint32_t buttonstate;
+	int64_t timestamp;
+} message_t;
+
 typedef struct adv_mfg_data {
 	uint16_t company_code;	    /* Company Identifier Code. */
-	uint16_t buttonstate;      
+	message_t message;      
 } adv_mfg_data_type;
 
-static adv_mfg_data_type adv_mfg_data = {COMPANY_ID_CODE,0x00};
+static adv_mfg_data_type adv_mfg_data = {COMPANY_ID_CODE,0,0};
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
-	BT_DATA(BT_DATA_MANUFACTURER_DATA,&adv_mfg_data, sizeof(adv_mfg_data))
+	
 };
 
-static unsigned char url_data[] = { 0x17, '/', '/', 'a', 'c', 'a', 'd', 'e', 'm',
-				    'y',  '.', 'n', 'o', 'r', 'd', 'i', 'c', 's',
-				    'e',  'm', 'i', '.', 'c', 'o', 'm' };
+
 
 static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_URI, url_data, sizeof(url_data)),
+	BT_DATA(BT_DATA_MANUFACTURER_DATA,&adv_mfg_data, sizeof(adv_mfg_data))
 };
 static struct bt_le_adv_param *adv_param =
-	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_NONE,
+	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_NOTIFY_SCAN_REQ,
 	ADV_MIN,
 	ADV_MAX,
 	NULL);
@@ -74,13 +79,33 @@ static struct gpio_callback button_cb_port0;
 static struct gpio_callback button_cb_port1;
 volatile uint32_t button_pressed = 0;
 volatile uint32_t button_pressed2 = 0;
+volatile uint64_t button_timestamp = 0;
+volatile uint64_t button_timestamp2 = 0;
+
 uint32_t pinmask_port0 = 0;
 uint32_t pinmask_port1 = 0;
 
+//semaphore to signal that a message has been received
+static struct k_sem message_received;
+
+
+void button_thread(void);
+K_THREAD_DEFINE(button_thread_id, 1024, button_thread, NULL, NULL, NULL, 7, 0, 0);
+
 static void scanned(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_scanned_info *info) {
 	char addr[BT_ADDR_LE_STR_LEN];
+	//check if the message is from a device we care about
+	if(bt_addr_le_eq(&info->addr, &central_addr_le)){
+		//give the semaphore to signal that a message has been received
+		k_sem_give(&message_received);
+		
+		LOG_INF("Scanned by THE central");
+	}
+
 	bt_addr_le_to_str(info->addr, addr, sizeof(addr));
-    printk("Scanned by addr:%s\n", addr);
+    LOG_INF("Scanned by addr:%s\n", addr);
+	bt_addr_le_to_str(&central_addr_le, addr, sizeof(addr));
+	LOG_INF("Should be:%s\n", addr);
 }
 
 static struct bt_le_ext_adv_cb adv_callbacks = {
@@ -92,15 +117,47 @@ static struct bt_le_ext_adv_cb adv_callbacks = {
 void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
 	
-	LOG_INF("Button pressed at %d, ----------------------%d\n", k_cycle_get_32(), pins);
+	button_timestamp = k_uptime_get();
 	button_pressed = pins;
+	k_wakeup(button_thread_id);
+	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp, pins);
 }
 
 void button_pressed_cb2(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-	LOG_INF("callback2 at %d, ----------------------%d\n", k_cycle_get_32(), pins);
+	
+	button_timestamp2 = k_uptime_get();
 	button_pressed2 = pins;
+	k_wakeup(button_thread_id);
+	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp2, pins);
 }
+
+void disable_button_interrupts(void){
+	int err;
+	for(int i = 0; i < ARRAY_SIZE(buttons); i++){
+		err = gpio_pin_interrupt_configure_dt(&buttons[i],
+					      GPIO_INT_DISABLE);
+		if (err != 0) {
+			LOG_INF("Error %d: failed to disable interrupt on %s pin %d\n",
+				err, buttons[i].port->name, buttons[i].pin);
+		}
+	}
+	
+}
+
+void enable_button_interrupts(void){
+	int err;
+	for(int i = 0; i < ARRAY_SIZE(buttons); i++){
+		err = gpio_pin_interrupt_configure_dt(&buttons[i],
+					      GPIO_INT_EDGE_TO_ACTIVE);
+		if (err != 0) {
+			LOG_INF("Error %d: failed to configure interrupt on %s pin %d\n",
+				err, buttons[i].port->name, buttons[i].pin);
+		}
+	}
+	
+}
+
 
 int buttons_init(void){
 	
@@ -122,12 +179,12 @@ int buttons_init(void){
 	// Check if all buttons are ready
 	for (int i=0; i < ARRAY_SIZE(buttons); i++) {
 		if (!gpio_is_ready_dt(&buttons[i])) {
-		printk("Error: button device %s is not ready\n",
+		LOG_ERR("Error: button device %s is not ready\n",
 		       buttons[i].port->name);
 		return 0;
 		}
 		else{
-			printk("Button device %s is ready\n",
+			LOG_INF("Button device %s is ready\n",
 		       buttons[i].port->name);
 		}
 	}
@@ -149,7 +206,7 @@ int buttons_init(void){
 		ret = gpio_pin_interrupt_configure_dt(&buttons[i],
 					      GPIO_INT_EDGE_TO_ACTIVE);
 		if (ret != 0) {
-			printk("Error %d: failed to configure interrupt on %s pin %d\n",
+			LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n",
 				ret, buttons[i].port->name, buttons[i].pin);
 			return 0;
 		}
@@ -162,13 +219,16 @@ int buttons_init(void){
 		else{
 			LOG_ERR("Button %s pin %d not on GPIO0 or GPIO1", buttons[i].port->name, buttons[i].pin);
 		}
-		printk("Set up button at %s pin %d\n", buttons[i].port->name, buttons[i].pin);
+		LOG_INF("Set up button at %s pin %d\n", buttons[i].port->name, buttons[i].pin);
 	}
 
 
 
 	return 0;
 }
+
+
+
 static uint32_t get_buttons(void)
 {
 	uint32_t ret = 0;
@@ -219,6 +279,77 @@ uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 	return ret;
 }
 
+void button_thread(void){
+	LOG_INF("Button thread started");
+	uint32_t buttons = 0;
+	uint32_t prev_buttons = 0;
+	int err;
+	int messages_waiting = 0;
+	uint64_t timestamp = 0;
+	uint64_t timestamp2 = 0;
+	message_t to_send[10];
+	k_sleep(K_MSEC(1000));
+	while(1){
+		//sleep until a button is pressed
+		k_sleep(K_FOREVER);
+
+		LOG_INF("Thread woken up");
+		//disable the button interrupts
+		disable_button_interrupts();
+		adv_mfg_data.message.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
+		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+		if (err) {
+			LOG_ERR("Advertising failed to start (err %d)\n", err);
+			k_sleep(K_FOREVER);
+		}
+		LOG_INF("Advertising started");
+		timestamp = k_uptime_get();
+		//start polling buttons for subsequent presses
+		do{
+			LOG_INF("Polling buttons");
+			k_msleep(100);
+			prev_buttons = buttons;
+			buttons = get_buttons();
+			if(prev_buttons == 0 && buttons != 0){
+				//if a button is pressed, add it to the message
+				to_send[messages_waiting].buttonstate = (uint16_t)buttonstateToUint(buttons, 0);
+				to_send[messages_waiting].timestamp = k_uptime_get();
+				messages_waiting++;
+				if(messages_waiting >= 9){
+					LOG_ERR("Too many messages waiting to be sent, %d", messages_waiting);
+					break;
+				}
+				LOG_INF("Button pressed, added to message, %d", to_send[messages_waiting-1].buttonstate);
+			}
+			if(k_sem_take(&message_received, K_NO_WAIT) && messages_waiting) {
+				//if scanner scanned our message, we can add a pending one
+				adv_mfg_data.message = to_send[messages_waiting];
+				messages_waiting--;
+				err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+				if (err) {
+					LOG_ERR("Failed to set advertising data (%d)\n", err);
+					return -1;
+				}
+				LOG_INF("Message sent, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
+			}
+
+			timestamp2 = k_uptime_get();
+		}while(messages_waiting || (timestamp2 - timestamp < 1000));
+		//stop advertising
+		err = bt_le_ext_adv_stop(adv);
+		if (err) {
+			LOG_ERR("Advertising failed to stop (err %d)\n", err);
+			k_sleep(K_FOREVER);
+		}
+		LOG_INF("Advertising stopped");
+		//enable button interrupts
+		enable_button_interrupts();
+		LOG_INF("Thread going to sleep");
+
+	}
+}
+	
+
 
 int main(void)
 {
@@ -232,23 +363,20 @@ int main(void)
 		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
 	}
 	int err;
+	char central[BT_ADDR_LE_STR_LEN];
+	bt_addr_le_to_str(&central_addr_le, central, sizeof(central));
+	LOG_INF("Central we are going for: %s", central);
+	k_sem_init(&message_received, 0, 10);
 	
-	
-	if(!buttons_init()){
-		LOG_INF("Buttons initialized");
-	}
-	else{
-		LOG_ERR("Buttons not initialized");
-	}
 	k_msleep(1000);
 	printk("pinmask0 0x%x, pinmask1 0x%x, array size: %d\n",  pinmask_port0, pinmask_port1,ARRAY_SIZE(buttons));
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)\n", err);
-		return;
+		return -1;
 	}
 
-	err = bt_le_ext_adv_create(BT_LE_ADV_SCAN_NOTIFY, &adv_callbacks, &adv);
+	err = bt_le_ext_adv_create(adv_param, &adv_callbacks, &adv);
     if (err) {
         LOG_ERR("Failed to create advertiser set (%d)\n", err);
         return -1;
@@ -258,30 +386,42 @@ int main(void)
         LOG_ERR("Failed to set advertising data (%d)\n", err);
         return -1;
     }
-	err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
-    if (err) {
-        LOG_ERR("Failed to start advertising set (%d)\n", err);
-        return -1;
-    }
-	LOG_INF("Advertising started");
 
-
-
-
-	uint32_t buttons = 0;
-	while(1){
-		if(button_pressed || button_pressed2){
-			adv_mfg_data.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
-			bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-			button_pressed = 0, button_pressed2 = 0;
-			LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.buttonstate);
-			k_msleep(1000);
-		}
-		else{
-			adv_mfg_data.buttonstate = 0;
-			bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-		}
-		
+	if(!buttons_init()){
+		LOG_INF("Buttons initialized");
 	}
+	else{
+		LOG_ERR("Buttons not initialized");
+	}
+
+	while(1){
+		k_sleep(K_FOREVER);
+	}
+
+	// err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+    // if (err) {
+    //     LOG_ERR("Failed to start advertising set (%d)\n", err);
+    //     return -1;
+    // }
+	// LOG_INF("Advertising started");
+
+
+	// uint32_t buttons = 0;
+	// while(1){
+	// 	if(button_pressed || button_pressed2){
+	// 		adv_mfg_data.message.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
+	// 		adv_mfg_data.message.timestamp = k_uptime_get();
+	// 		bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	// 		button_pressed = 0, button_pressed2 = 0;
+	// 		LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.message.buttonstate);
+	// 		k_msleep(1000);
+	// 	}
+	// 	else{
+	// 		adv_mfg_data.message.buttonstate = 0;
+	// 		adv_mfg_data.message.timestamp = 0;
+	// 		bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	// 	}
+		
+	// }
 	return 0;
 }
