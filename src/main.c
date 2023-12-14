@@ -31,13 +31,13 @@ static const struct gpio_dt_spec buttons[] = {
 #endif
 };
 
-//ble address of central towards which we are advertising 7D:F0:69:55:B8:ED
-#define CENTRAL_ADDR 0xED,0xB8,0x55,0x69,0xF0,0x7D
+//ble address of central towards which we are advertising 47:C3:E7:47:74:2C
+#define CENTRAL_ADDR 0x2C,0x74,0x47,0xE7,0xC3,0x47
 static const uint8_t central_addr[6] = {CENTRAL_ADDR};
 bt_addr_le_t central_addr_le = {.type = BT_ADDR_LE_RANDOM, .a = {.val = CENTRAL_ADDR}};
 
 #define ADV_MIN 100/0.625
-#define ADV_MAX 101/0.62
+#define ADV_MAX 101/0.625
 #define COMPANY_ID_CODE            0x0059//This is nordic's company ID, Algra Group should
 //get their own company ID if using this solution
 
@@ -94,8 +94,10 @@ K_THREAD_DEFINE(button_thread_id, 1024, button_thread, NULL, NULL, NULL, 7, 0, 0
 
 static void scanned(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_scanned_info *info) {
 	char addr[BT_ADDR_LE_STR_LEN];
+	bool eq = bt_addr_le_eq(&info->addr, &central_addr_le);
+	LOG_INF("bool: %d", eq);
 	//check if the message is from a device we care about
-	if(bt_addr_le_eq(&info->addr, &central_addr_le)){
+	if(eq){
 		//give the semaphore to signal that a message has been received
 		k_sem_give(&message_received);
 		
@@ -129,7 +131,7 @@ void button_pressed_cb2(const struct device *dev, struct gpio_callback *cb, uint
 	button_timestamp2 = k_uptime_get();
 	button_pressed2 = pins;
 	k_wakeup(button_thread_id);
-	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp2, pins);
+	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp, pins);
 }
 
 void disable_button_interrupts(void){
@@ -297,6 +299,13 @@ void button_thread(void){
 		//disable the button interrupts
 		disable_button_interrupts();
 		adv_mfg_data.message.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
+		adv_mfg_data.message.timestamp = button_timestamp;
+		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+		if (err) {
+			LOG_ERR("Failed to set advertising data (%d)\n", err);
+			return -1;
+		}
+		LOG_INF("Message updated to %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
 		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
 		if (err) {
 			LOG_ERR("Advertising failed to start (err %d)\n", err);
@@ -312,7 +321,7 @@ void button_thread(void){
 			buttons = get_buttons();
 			if(prev_buttons == 0 && buttons != 0){
 				//if a button is pressed, add it to the message
-				to_send[messages_waiting].buttonstate = (uint16_t)buttonstateToUint(buttons, 0);
+				to_send[messages_waiting].buttonstate = buttons;
 				to_send[messages_waiting].timestamp = k_uptime_get();
 				messages_waiting++;
 				if(messages_waiting >= 9){
@@ -323,8 +332,9 @@ void button_thread(void){
 			}
 			if(k_sem_take(&message_received, K_NO_WAIT) && messages_waiting) {
 				//if scanner scanned our message, we can add a pending one
-				adv_mfg_data.message = to_send[messages_waiting];
 				messages_waiting--;
+				adv_mfg_data.message = to_send[messages_waiting];
+				
 				err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 				if (err) {
 					LOG_ERR("Failed to set advertising data (%d)\n", err);
