@@ -31,10 +31,7 @@ static const struct gpio_dt_spec buttons[] = {
 #endif
 };
 
-//ble address of central towards which we are advertising 47:C3:E7:47:74:2C
-#define CENTRAL_ADDR 0x2C,0x74,0x47,0xE7,0xC3,0x47
-static const uint8_t central_addr[6] = {CENTRAL_ADDR};
-bt_addr_le_t central_addr_le = {.type = BT_ADDR_LE_RANDOM, .a = {.val = CENTRAL_ADDR}};
+
 
 #define ADV_MIN 100/0.625
 #define ADV_MAX 101/0.625
@@ -47,8 +44,8 @@ bt_addr_le_t central_addr_le = {.type = BT_ADDR_LE_RANDOM, .a = {.val = CENTRAL_
 static struct bt_le_ext_adv *adv;
 
 typedef struct __attribute__((packed)) message{
-	uint32_t buttonstate;
-	int64_t timestamp;
+	uint8_t buttonstate;
+	int32_t timestamp;
 } message_t;
 
 typedef struct adv_mfg_data {
@@ -61,6 +58,7 @@ static adv_mfg_data_type adv_mfg_data = {COMPANY_ID_CODE,0,0};
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
 	BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+	BT_DATA(BT_DATA_MANUFACTURER_DATA,&adv_mfg_data, sizeof(adv_mfg_data))
 	
 };
 
@@ -69,8 +67,9 @@ static const struct bt_data ad[] = {
 static const struct bt_data sd[] = {
 	BT_DATA(BT_DATA_MANUFACTURER_DATA,&adv_mfg_data, sizeof(adv_mfg_data))
 };
+
 static struct bt_le_adv_param *adv_param =
-	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_NOTIFY_SCAN_REQ,
+	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_NONE,
 	ADV_MIN,
 	ADV_MAX,
 	NULL);
@@ -90,31 +89,8 @@ static struct k_sem message_received;
 
 
 void button_thread(void);
-K_THREAD_DEFINE(button_thread_id, 1024, button_thread, NULL, NULL, NULL, 7, 0, 0);
+K_THREAD_DEFINE(button_thread_id, 1024, button_thread, NULL, NULL, NULL, 7, 0, 1000);
 
-static void scanned(struct bt_le_ext_adv *adv, struct bt_le_ext_adv_scanned_info *info) {
-	char addr[BT_ADDR_LE_STR_LEN];
-	bool eq = bt_addr_le_eq(&info->addr, &central_addr_le);
-	LOG_INF("bool: %d", eq);
-	//check if the message is from a device we care about
-	if(eq){
-		//give the semaphore to signal that a message has been received
-		k_sem_give(&message_received);
-		
-		LOG_INF("Scanned by THE central");
-	}
-
-	bt_addr_le_to_str(info->addr, addr, sizeof(addr));
-    LOG_INF("Scanned by addr:%s\n", addr);
-	bt_addr_le_to_str(&central_addr_le, addr, sizeof(addr));
-	LOG_INF("Should be:%s\n", addr);
-}
-
-static struct bt_le_ext_adv_cb adv_callbacks = {
-        .sent = NULL,
-		.connected = NULL,
-        .scanned = scanned
- };
 
 void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
@@ -140,7 +116,7 @@ void disable_button_interrupts(void){
 		err = gpio_pin_interrupt_configure_dt(&buttons[i],
 					      GPIO_INT_DISABLE);
 		if (err != 0) {
-			LOG_INF("Error %d: failed to disable interrupt on %s pin %d\n",
+			LOG_INF("Error %d: failed to disable interrupt on %s pin %d",
 				err, buttons[i].port->name, buttons[i].pin);
 		}
 	}
@@ -186,7 +162,7 @@ int buttons_init(void){
 		return 0;
 		}
 		else{
-			LOG_INF("Button device %s is ready\n",
+			LOG_INF("Button device %s is ready",
 		       buttons[i].port->name);
 		}
 	}
@@ -199,7 +175,7 @@ int buttons_init(void){
 			return ret;
 		}
 		else{
-			LOG_INF("Button %s pin %d configured\n",
+			LOG_INF("Button %s pin %d configured as input",
 				buttons[i].port->name, buttons[i].pin);
 		}
 	}
@@ -208,7 +184,7 @@ int buttons_init(void){
 		ret = gpio_pin_interrupt_configure_dt(&buttons[i],
 					      GPIO_INT_EDGE_TO_ACTIVE);
 		if (ret != 0) {
-			LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n",
+			LOG_ERR("Error %d: failed to configure interrupt on %s pin %d",
 				ret, buttons[i].port->name, buttons[i].pin);
 			return 0;
 		}
@@ -221,7 +197,7 @@ int buttons_init(void){
 		else{
 			LOG_ERR("Button %s pin %d not on GPIO0 or GPIO1", buttons[i].port->name, buttons[i].pin);
 		}
-		LOG_INF("Set up button at %s pin %d\n", buttons[i].port->name, buttons[i].pin);
+		LOG_INF("Set up interrupt at %s pin %d", buttons[i].port->name, buttons[i].pin);
 	}
 
 
@@ -231,9 +207,9 @@ int buttons_init(void){
 
 
 
-static uint32_t get_buttons(void)
+static uint8_t get_buttons(void)
 {
-	uint32_t ret = 0;
+	uint8_t ret = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(buttons); i++) {
 		int val;
 
@@ -283,14 +259,14 @@ uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 
 void button_thread(void){
 	LOG_INF("Button thread started");
-	uint32_t buttons = 0;
-	uint32_t prev_buttons = 0;
+	uint8_t buttons = 0;
+	uint8_t prev_buttons = 0;
 	int err;
 	int messages_waiting = 0;
 	uint64_t timestamp = 0;
 	uint64_t timestamp2 = 0;
 	message_t to_send[10];
-	k_sleep(K_MSEC(1000));
+	
 	while(1){
 		//sleep until a button is pressed
 		k_sleep(K_FOREVER);
@@ -298,8 +274,8 @@ void button_thread(void){
 		LOG_INF("Thread woken up");
 		//disable the button interrupts
 		disable_button_interrupts();
-		adv_mfg_data.message.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
-		adv_mfg_data.message.timestamp = button_timestamp;
+		adv_mfg_data.message.buttonstate = (uint8_t)buttonstateToUint(button_pressed, button_pressed2);
+		adv_mfg_data.message.timestamp = (uint32_t)button_timestamp;
 		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		if (err) {
 			LOG_ERR("Failed to set advertising data (%d)\n", err);
@@ -322,7 +298,9 @@ void button_thread(void){
 			if(prev_buttons == 0 && buttons != 0){
 				//if a button is pressed, add it to the message
 				to_send[messages_waiting].buttonstate = buttons;
-				to_send[messages_waiting].timestamp = k_uptime_get();
+				timestamp = (uint32_t)k_uptime_get();
+				to_send[messages_waiting].timestamp = (uint32_t)timestamp;
+
 				messages_waiting++;
 				if(messages_waiting >= 9){
 					LOG_ERR("Too many messages waiting to be sent, %d", messages_waiting);
@@ -344,7 +322,7 @@ void button_thread(void){
 			}
 
 			timestamp2 = k_uptime_get();
-		}while(messages_waiting || (timestamp2 - timestamp < 1000));
+		}while(messages_waiting || (timestamp2 - timestamp < 3000));
 		//stop advertising
 		err = bt_le_ext_adv_stop(adv);
 		if (err) {
@@ -373,9 +351,7 @@ int main(void)
 		while (NRF_NVMC->READY == NVMC_READY_READY_Busy){}
 	}
 	int err;
-	char central[BT_ADDR_LE_STR_LEN];
-	bt_addr_le_to_str(&central_addr_le, central, sizeof(central));
-	LOG_INF("Central we are going for: %s", central);
+	LOG_INF("Advertisement data length: %d", ARRAY_SIZE(ad));
 	k_sem_init(&message_received, 0, 10);
 	
 	k_msleep(1000);
@@ -386,7 +362,7 @@ int main(void)
 		return -1;
 	}
 
-	err = bt_le_ext_adv_create(adv_param, &adv_callbacks, &adv);
+	err = bt_le_ext_adv_create(adv_param, NULL, &adv);
     if (err) {
         LOG_ERR("Failed to create advertiser set (%d)\n", err);
         return -1;
