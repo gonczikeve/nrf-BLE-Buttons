@@ -249,8 +249,8 @@ void button_thread(void){
 		//get message from fifo
 	    fifo_rec = k_fifo_get(&bp_fifo, K_FOREVER);
 		adv_mfg_data.message = fifo_rec->message;
-		k_free(fifo_rec);
 		LOG_INF("Message received from fifo, %d, %d", fifo_rec->message.buttonstate, fifo_rec->message.timestamp);
+		k_free(fifo_rec);
 		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		if (err) {
 			LOG_ERR("Failed to set advertising data (%d)\n", err);
