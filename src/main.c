@@ -76,7 +76,7 @@ static const struct bt_data sd[] = {
 };
 
 static struct bt_le_adv_param *adv_param =
-	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_USE_IDENTITY,
+	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_USE_IDENTITY | BT_LE_ADV_OPT_CODED | BT_LE_ADV_OPT_EXT_ADV,
 	ADV_MIN,
 	ADV_MAX,
 	NULL);
@@ -251,7 +251,7 @@ void button_thread(void){
 		adv_mfg_data.message = fifo_rec->message;
 		k_free(fifo_rec);
 		LOG_INF("Message received from fifo, %d, %d", fifo_rec->message.buttonstate, fifo_rec->message.timestamp);
-		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), NULL, 0);
 		if (err) {
 			LOG_ERR("Failed to set advertising data (%d)\n", err);
 			return -1;
@@ -306,7 +306,7 @@ int main(void)
         LOG_ERR("Failed to create advertiser set (%d)\n", err);
         return -1;
     }
-	err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err) {
         LOG_ERR("Failed to set advertising data (%d)\n", err);
         return -1;
