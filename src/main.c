@@ -118,14 +118,6 @@ void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint3
 
 	fifo_message_t * fifo_message = k_malloc(sizeof(fifo_message_t));
 	fifo_message->message = to_send;
-	// fifo_message_t fifo_message = 
-	// {
-	// 	.message = to_send
-	// };
-	// int err = k_fifo_alloc_put(&bp_fifo, &fifo_message);
-	// if(err){
-	// 	LOG_ERR("Failed to put message in fifo");
-	// }
 	k_fifo_put(&bp_fifo, fifo_message);
 	LOG_INF("callback at %d, ----------------------%d\n", to_send.timestamp,to_send.buttonstate);
 }
@@ -139,43 +131,13 @@ void button_pressed_cb2(const struct device *dev, struct gpio_callback *cb, uint
 	to_send.buttonstate = buttonstateToUint(0, pins);
 	fifo_message_t * fifo_message = k_malloc(sizeof(fifo_message_t));
 	fifo_message->message = to_send;
-	// fifo_message_t fifo_message = 
-	// {
-	// 	.message = to_send
-	// };
-	// int err = k_fifo_alloc_put(&bp_fifo, &fifo_message);
-	// if(err){
-	// 	LOG_ERR("Failed to put message in fifo");
-	// }
 	k_fifo_put(&bp_fifo, fifo_message);
 	LOG_INF("callback2 at %d, ----------------------%d\n", to_send.timestamp,to_send.buttonstate);
 }
 
-void disable_button_interrupts(void){
-	int err;
-	for(int i = 0; i < ARRAY_SIZE(buttons); i++){
-		err = gpio_pin_interrupt_configure_dt(&buttons[i],
-					      GPIO_INT_DISABLE);
-		if (err != 0) {
-			LOG_INF("Error %d: failed to disable interrupt on %s pin %d",
-				err, buttons[i].port->name, buttons[i].pin);
-		}
-	}
-	
-}
 
-void enable_button_interrupts(void){
-	int err;
-	for(int i = 0; i < ARRAY_SIZE(buttons); i++){
-		err = gpio_pin_interrupt_configure_dt(&buttons[i],
-					      GPIO_INT_EDGE_TO_ACTIVE);
-		if (err != 0) {
-			LOG_INF("Error %d: failed to configure interrupt on %s pin %d\n",
-				err, buttons[i].port->name, buttons[i].pin);
-		}
-	}
-	
-}
+
+
 
 
 int buttons_init(void){
@@ -248,24 +210,6 @@ int buttons_init(void){
 
 
 
-static uint8_t get_buttons(void)
-{
-	uint8_t ret = 0;
-	for (size_t i = 0; i < ARRAY_SIZE(buttons); i++) {
-		int val;
-
-		val = gpio_pin_get_dt(&buttons[i]);
-		if (val < 0) {
-			LOG_ERR("Cannot read gpio pin");
-			return 0;
-		}
-		if (val) {
-			ret |= 1U << i;
-		}
-	}
-
-	return ret;
-}
 
 uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 	//pack the 8 buttons into a uint8_t
@@ -301,7 +245,6 @@ uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 void button_thread(void){
 	LOG_INF("Button thread started");
 	int err;
-	int messages_waiting = 0;
 	fifo_message_t *fifo_rec;
 
 	
@@ -325,42 +268,7 @@ void button_thread(void){
 		LOG_INF("Advertising updated, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
 		LOG_INF("Waiting for message to be sent");
 		k_sem_take(&message_received, K_FOREVER);
-		LOG_INF("Message was sent in advertising packets");
-
-
-		//start polling buttons for subsequent presses
-		// do{
-			
-		// 	if( available_sems && messages_waiting) {
-		// 		available_sems--;
-		// 		//if scanner scanned our message, we can add a pending one
-		// 		messages_waiting--;
-		// 		adv_mfg_data.message = to_send[messages_waiting];
-				
-		// 		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-		// 		if (err) {
-		// 			LOG_ERR("Failed to set advertising data (%d)\n", err);
-		// 			return -1;
-		// 		}
-		// 		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_PARAM(0, 2));
-		// 		if (err) {
-		// 			LOG_ERR("Advertising failed to start in polling(err %d)\n", err);
-		// 			k_sleep(K_FOREVER);
-		// 		}
-		// 		LOG_INF("Advertising updated, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
-		// 	}
-
-		// 	timestamp2 = k_uptime_get();
-		// }while(messages_waiting || (timestamp2 - timestamp < 3000));
-		// //stop advertising
-		// err = bt_le_ext_adv_stop(adv);
-		// if (err) {
-		// 	LOG_ERR("Advertising failed to stop (err %d)\n", err);
-		// 	k_sleep(K_FOREVER);
-		// }
-		// LOG_INF("Advertising stopped");
-		// //enable button interrupts
-		// LOG_INF("Thread going to sleep");
+		LOG_INF("Message was sent in advertising packets %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
 
 	}
 }
@@ -386,6 +294,7 @@ int main(void)
 		return -1;
 	}
 	k_fifo_init(&bp_fifo);
+
 
 	
 	k_msleep(1000);
@@ -418,30 +327,5 @@ int main(void)
 		k_sleep(K_FOREVER);
 	}
 
-	// err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
-    // if (err) {
-    //     LOG_ERR("Failed to start advertising set (%d)\n", err);
-    //     return -1;
-    // }
-	// LOG_INF("Advertising started");
-
-
-	// uint32_t buttons = 0;
-	// while(1){
-	// 	if(button_pressed || button_pressed2){
-	// 		adv_mfg_data.message.buttonstate = (uint16_t)buttonstateToUint(button_pressed, button_pressed2);
-	// 		adv_mfg_data.message.timestamp = k_uptime_get();
-	// 		bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	// 		button_pressed = 0, button_pressed2 = 0;
-	// 		LOG_INF("Button pressed, advertising updated to %d", adv_mfg_data.message.buttonstate);
-	// 		k_msleep(1000);
-	// 	}
-	// 	else{
-	// 		adv_mfg_data.message.buttonstate = 0;
-	// 		adv_mfg_data.message.timestamp = 0;
-	// 		bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	// 	}
-		
-	// }
 	return 0;
 }
