@@ -10,7 +10,7 @@
 
 #include <zephyr/types.h>
 #include <stddef.h>
-#include <zephyr/sys/printk.h>
+
 #include <zephyr/sys/util.h>
 
 
@@ -33,8 +33,8 @@ static const struct gpio_dt_spec buttons[] = {
 
 
 
-#define ADV_MIN 100/0.625
-#define ADV_MAX 101/0.625
+#define ADV_MIN 500/0.625
+#define ADV_MAX 501/0.625
 #define COMPANY_ID_CODE            0x0059//This is nordic's company ID, Algra Group should
 //get their own company ID if using this solution
 
@@ -47,6 +47,11 @@ typedef struct __attribute__((packed)) message{
 	uint8_t buttonstate;
 	int32_t timestamp;
 } message_t;
+
+typedef struct fifo_message{
+	void *fifo_reserved;    /* 1st word reserved for use by fifo */
+	message_t message;
+} fifo_message_t;
 
 typedef struct adv_mfg_data {
 	uint16_t company_code;	    /* Company Identifier Code. */
@@ -62,6 +67,8 @@ static const struct bt_data ad[] = {
 	
 };
 
+struct k_fifo bp_fifo;
+
 
 
 static const struct bt_data sd[] = {
@@ -69,7 +76,7 @@ static const struct bt_data sd[] = {
 };
 
 static struct bt_le_adv_param *adv_param =
-	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_NONE,
+	BT_LE_ADV_PARAM(BT_LE_ADV_OPT_USE_IDENTITY,
 	ADV_MIN,
 	ADV_MAX,
 	NULL);
@@ -89,25 +96,59 @@ static struct k_sem message_received;
 
 
 void button_thread(void);
+uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2);
 K_THREAD_DEFINE(button_thread_id, 1024, button_thread, NULL, NULL, NULL, 7, 0, 1000);
 
+void advertisement_sent_cb(struct bt_le_ext_adv *instance,
+			   struct bt_le_ext_adv_sent_info *info)
+{
+	LOG_INF("Advertised with new message %d times", info->num_sent);
+	k_sem_give(&message_received);
+}
+
+struct bt_le_ext_adv_cb adv_cb = {
+	.sent = advertisement_sent_cb,
+};
 
 void button_pressed_cb(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-	
-	button_timestamp = k_uptime_get();
-	button_pressed = pins;
-	k_wakeup(button_thread_id);
-	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp, pins);
+	message_t to_send;
+	to_send.timestamp = (uint32_t)k_uptime_get();
+	to_send.buttonstate = buttonstateToUint(pins, 0);
+
+	fifo_message_t * fifo_message = k_malloc(sizeof(fifo_message_t));
+	fifo_message->message = to_send;
+	// fifo_message_t fifo_message = 
+	// {
+	// 	.message = to_send
+	// };
+	// int err = k_fifo_alloc_put(&bp_fifo, &fifo_message);
+	// if(err){
+	// 	LOG_ERR("Failed to put message in fifo");
+	// }
+	k_fifo_put(&bp_fifo, fifo_message);
+	LOG_INF("callback at %d, ----------------------%d\n", to_send.timestamp,to_send.buttonstate);
 }
 
 void button_pressed_cb2(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
 	
-	button_timestamp2 = k_uptime_get();
-	button_pressed2 = pins;
-	k_wakeup(button_thread_id);
-	LOG_INF("callback2 at %d, ----------------------%d\n", button_timestamp, pins);
+	message_t to_send;
+	
+	to_send.timestamp = (uint32_t)k_uptime_get();
+	to_send.buttonstate = buttonstateToUint(0, pins);
+	fifo_message_t * fifo_message = k_malloc(sizeof(fifo_message_t));
+	fifo_message->message = to_send;
+	// fifo_message_t fifo_message = 
+	// {
+	// 	.message = to_send
+	// };
+	// int err = k_fifo_alloc_put(&bp_fifo, &fifo_message);
+	// if(err){
+	// 	LOG_ERR("Failed to put message in fifo");
+	// }
+	k_fifo_put(&bp_fifo, fifo_message);
+	LOG_INF("callback2 at %d, ----------------------%d\n", to_send.timestamp,to_send.buttonstate);
 }
 
 void disable_button_interrupts(void){
@@ -259,80 +300,67 @@ uint8_t buttonstateToUint(uint32_t buttonstate, uint32_t buttonstate2){
 
 void button_thread(void){
 	LOG_INF("Button thread started");
-	uint8_t buttons = 0;
-	uint8_t prev_buttons = 0;
 	int err;
 	int messages_waiting = 0;
-	uint64_t timestamp = 0;
-	uint64_t timestamp2 = 0;
-	message_t to_send[10];
+	fifo_message_t *fifo_rec;
+
 	
 	while(1){
-		//sleep until a button is pressed
-		k_sleep(K_FOREVER);
-
-		LOG_INF("Thread woken up");
-		//disable the button interrupts
-		disable_button_interrupts();
-		adv_mfg_data.message.buttonstate = (uint8_t)buttonstateToUint(button_pressed, button_pressed2);
-		adv_mfg_data.message.timestamp = (uint32_t)button_timestamp;
+		LOG_INF("Blocking on fifo");
+		//get message from fifo
+	    fifo_rec = k_fifo_get(&bp_fifo, K_FOREVER);
+		adv_mfg_data.message = fifo_rec->message;
+		k_free(fifo_rec);
+		LOG_INF("Message received from fifo, %d, %d", fifo_rec->message.buttonstate, fifo_rec->message.timestamp);
 		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 		if (err) {
 			LOG_ERR("Failed to set advertising data (%d)\n", err);
 			return -1;
 		}
-		LOG_INF("Message updated to %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
-		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_PARAM(0, 10));
 		if (err) {
-			LOG_ERR("Advertising failed to start (err %d)\n", err);
+			LOG_ERR("failed to start advertising (err %d)\n", err);
 			k_sleep(K_FOREVER);
 		}
-		LOG_INF("Advertising started");
-		timestamp = k_uptime_get();
+		LOG_INF("Advertising updated, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
+		LOG_INF("Waiting for message to be sent");
+		k_sem_take(&message_received, K_FOREVER);
+		LOG_INF("Message was sent in advertising packets");
+
+
 		//start polling buttons for subsequent presses
-		do{
-			LOG_INF("Polling buttons");
-			k_msleep(100);
-			prev_buttons = buttons;
-			buttons = get_buttons();
-			if(prev_buttons == 0 && buttons != 0){
-				//if a button is pressed, add it to the message
-				to_send[messages_waiting].buttonstate = buttons;
-				timestamp = (uint32_t)k_uptime_get();
-				to_send[messages_waiting].timestamp = (uint32_t)timestamp;
-
-				messages_waiting++;
-				if(messages_waiting >= 9){
-					LOG_ERR("Too many messages waiting to be sent, %d", messages_waiting);
-					break;
-				}
-				LOG_INF("Button pressed, added to message, %d", to_send[messages_waiting-1].buttonstate);
-			}
-			if(k_sem_take(&message_received, K_NO_WAIT) && messages_waiting) {
-				//if scanner scanned our message, we can add a pending one
-				messages_waiting--;
-				adv_mfg_data.message = to_send[messages_waiting];
+		// do{
+			
+		// 	if( available_sems && messages_waiting) {
+		// 		available_sems--;
+		// 		//if scanner scanned our message, we can add a pending one
+		// 		messages_waiting--;
+		// 		adv_mfg_data.message = to_send[messages_waiting];
 				
-				err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-				if (err) {
-					LOG_ERR("Failed to set advertising data (%d)\n", err);
-					return -1;
-				}
-				LOG_INF("Message sent, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
-			}
+		// 		err = bt_le_ext_adv_set_data(adv, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+		// 		if (err) {
+		// 			LOG_ERR("Failed to set advertising data (%d)\n", err);
+		// 			return -1;
+		// 		}
+		// 		err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_PARAM(0, 2));
+		// 		if (err) {
+		// 			LOG_ERR("Advertising failed to start in polling(err %d)\n", err);
+		// 			k_sleep(K_FOREVER);
+		// 		}
+		// 		LOG_INF("Advertising updated, %d, %d", adv_mfg_data.message.buttonstate, adv_mfg_data.message.timestamp);
+		// 	}
 
-			timestamp2 = k_uptime_get();
-		}while(messages_waiting || (timestamp2 - timestamp < 3000));
-		//stop advertising
-		err = bt_le_ext_adv_stop(adv);
-		if (err) {
-			LOG_ERR("Advertising failed to stop (err %d)\n", err);
-			k_sleep(K_FOREVER);
-		}
-		LOG_INF("Advertising stopped");
-		//enable button interrupts
-		enable_button_interrupts();
-		LOG_INF("Thread going to sleep");
+		// 	timestamp2 = k_uptime_get();
+		// }while(messages_waiting || (timestamp2 - timestamp < 3000));
+		// //stop advertising
+		// err = bt_le_ext_adv_stop(adv);
+		// if (err) {
+		// 	LOG_ERR("Advertising failed to stop (err %d)\n", err);
+		// 	k_sleep(K_FOREVER);
+		// }
+		// LOG_INF("Advertising stopped");
+		// //enable button interrupts
+		// LOG_INF("Thread going to sleep");
 
 	}
 }
@@ -352,17 +380,23 @@ int main(void)
 	}
 	int err;
 	LOG_INF("Advertisement data length: %d", ARRAY_SIZE(ad));
-	k_sem_init(&message_received, 0, 10);
+	err = k_sem_init(&message_received, 0, 10);
+	if (err) {
+		LOG_ERR("Failed to initialize semaphore (err %d)\n", err);
+		return -1;
+	}
+	k_fifo_init(&bp_fifo);
+
 	
 	k_msleep(1000);
-	printk("pinmask0 0x%x, pinmask1 0x%x, array size: %d\n",  pinmask_port0, pinmask_port1,ARRAY_SIZE(buttons));
+	LOG_INF("pinmask0 0x%x, pinmask1 0x%x, array size: %d\n",  pinmask_port0, pinmask_port1,ARRAY_SIZE(buttons));
 	err = bt_enable(NULL);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)\n", err);
 		return -1;
 	}
 
-	err = bt_le_ext_adv_create(adv_param, NULL, &adv);
+	err = bt_le_ext_adv_create(adv_param, &adv_cb, &adv);
     if (err) {
         LOG_ERR("Failed to create advertiser set (%d)\n", err);
         return -1;
