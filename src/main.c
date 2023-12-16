@@ -83,10 +83,6 @@ static struct bt_le_adv_param *adv_param =
 
 static struct gpio_callback button_cb_port0;
 static struct gpio_callback button_cb_port1;
-volatile uint32_t button_pressed = 0;
-volatile uint32_t button_pressed2 = 0;
-volatile uint64_t button_timestamp = 0;
-volatile uint64_t button_timestamp2 = 0;
 
 uint32_t pinmask_port0 = 0;
 uint32_t pinmask_port1 = 0;
