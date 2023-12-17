@@ -34,7 +34,7 @@ static const struct gpio_dt_spec buttons[] = {
 
 
 #define ADV_MIN 500/0.625
-#define ADV_MAX 501/0.625
+#define ADV_MAX 510/0.625
 #define COMPANY_ID_CODE            0x0059//This is nordic's company ID, Algra Group should
 //get their own company ID if using this solution
 
