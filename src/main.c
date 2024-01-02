@@ -22,7 +22,9 @@ LOG_MODULE_REGISTER(dynaforce, LOG_LEVEL_INF);
 #define GPIO0_DEV DEVICE_DT_GET(DT_NODELABEL(gpio0))
 #define GPIO1_DEV DEVICE_DT_GET(DT_NODELABEL(gpio1))
 
-#define CODED_PHY 0//BT_LE_ADV_OPT_CODED //if we want to use coded phy
+//This solution has not been finished, it is not fully working yet.
+//However, it presents the idea about acknowledgements via scan requests, and the debouncing of the buttons
+//that were mentioned in the report.
 
 #define GPIO_SPEC_AND_COMMA(button) GPIO_DT_SPEC_GET(button, gpios),
 static const struct gpio_dt_spec buttons[] = {
